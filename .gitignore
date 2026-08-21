@@ -1,0 +1,16 @@
+# Build outputs
+*.exe
+*.o
+*.out
+
+# Local test output
+input.txt
+output.txt
+*.tmp
+
+# Logs
+*.log
+
+# IDE and compiler artifacts
+.vscode/.browse.VC.db*
+.vscode/ipch/
