@@ -1,201 +1,230 @@
-# SocketForge HTTP Server
+# High-Performance Multi-Threaded HTTP Web Server Engine
 
-A lightweight, high-performance HTTP/1.1 server written in modern C++ using raw sockets and a custom thread pool.
+A modern C++ HTTP/1.1 server built from the socket layer up. The project combines non-blocking TCP networking, a fixed worker-thread pool, bounded request parsing, RAII resource management, and graceful shutdown into one compact systems-programming project.
 
-This project is built to demonstrate how an HTTP server works close to the operating system: non-blocking sockets, polling, worker-thread coordination, request parsing, response construction, and graceful shutdown.
+It is designed to make the mechanics of a web server visible: connections arrive through a non-blocking listener, workers process them from a synchronized queue, and every request produces a standards-shaped HTTP response.
 
-## Features
+## Highlights
 
-- Non-blocking TCP sockets
-- POSIX networking on Linux and macOS
-- Windows Winsock support through MinGW
-- Fixed-size worker thread pool using `std::thread`
-- Thread-safe job queue with `std::mutex` and `std::condition_variable`
-- Atomic shutdown state
-- RAII socket/file-descriptor ownership
-- HTTP/1.1 request-line parsing
-- `GET` and `POST` support
-- `Content-Length` request-body handling
-- Clean `200`, `400`, `404`, and shutdown behavior
-- Request metrics showing worker thread IDs and request sizes
+- Non-blocking TCP sockets with `poll`/`WSAPoll`
+- POSIX socket support on Linux and macOS
+- Windows Winsock support with MinGW-w64
+- Fixed-size thread pool with no thread-per-request overhead
+- Thread-safe work queue using `std::mutex`, `std::queue`, and `std::condition_variable`
+- Atomic server and pool shutdown state
+- RAII ownership for client and listener sockets
+- HTTP/1.1 request-line parsing for `GET` and `POST`
+- `Content-Length`-aware request-body handling
+- Bounded request size to avoid unbounded memory growth
+- `200`, `400`, and `404` HTTP responses
+- Per-request worker and byte-count metrics
 - Graceful `Ctrl+C` shutdown
 
-## Repository Name
+## Repository
 
-Recommended name:
-
-```text
-socketforge-http-server
-```
-
-## Repository Description
+**Repository name:**
 
 ```text
-A high-performance multithreaded HTTP/1.1 server in modern C++ using raw non-blocking sockets and a custom thread pool.
+High-Performance-Multi-Threaded-HTTP-Web-Server-Engine
 ```
 
-## Requirements
+**GitHub description:**
 
-- C++17 or newer
-- C++20 recommended
-- GCC or Clang
-- Windows: MinGW-w64 with Winsock2
-- Linux/macOS: POSIX socket development environment
+```text
+A modern C++ HTTP/1.1 server using raw non-blocking sockets, a custom thread pool, and RAII resource management.
+```
 
-## Build
+## Quick Start: Windows
 
-### Windows with MinGW-w64
+### Requirements
 
-Run from the repository directory:
+- Windows 10 or newer
+- MinGW-w64 with `g++`
+- C++17 or newer; C++20 recommended
+- `curl` for testing
+
+Open Command Prompt or PowerShell in the project directory and compile:
 
 ```powershell
 g++ -DLOCAL -std=gnu++20 -Wall -Wextra -pedantic "Web Server.cpp" -lws2_32 -o "Web Server.exe"
 ```
 
-Run the server in PowerShell:
+Start the server in PowerShell:
 
 ```powershell
 & ".\Web Server.exe"
 ```
 
-Run the server in Command Prompt:
+Start it in Command Prompt:
 
 ```cmd
 ".\Web Server.exe"
 ```
 
-The quotes are required because the source and executable names contain spaces.
+The quotes are required because the filename contains spaces. The server listens at:
 
-### Linux or macOS
+```text
+http://127.0.0.1:8080
+```
+
+## Quick Start: Linux and macOS
 
 ```bash
 g++ -std=c++20 -Wall -Wextra -pedantic "Web Server.cpp" -pthread -o web-server
 ./web-server
 ```
 
-The server listens on:
+## Try the Server
 
-```text
-http://127.0.0.1:8080
-```
+Keep the server terminal open. Use a second terminal to send requests.
 
-## Try It
-
-Keep the server terminal open and use a second terminal for requests.
-
-### Health check
-
-```bash
-curl http://127.0.0.1:8080/health
-```
-
-Expected response:
-
-```text
-OK
-```
-
-### Root route
+### Root endpoint
 
 ```bash
 curl http://127.0.0.1:8080/
 ```
 
-Expected response:
+Response:
 
 ```text
 High-performance C++ HTTP server is running
 ```
 
-### POST echo
+### Health endpoint
+
+```bash
+curl http://127.0.0.1:8080/health
+```
+
+Response:
+
+```text
+OK
+```
+
+### POST echo endpoint
 
 ```bash
 curl -X POST -d "hello server" http://127.0.0.1:8080/echo
 ```
 
-Expected response:
+Response:
 
 ```text
 hello server
 ```
 
-### Missing route
+### Not-found response
+
+Use `-i` to display the HTTP status and headers:
 
 ```bash
 curl -i http://127.0.0.1:8080/missing
 ```
 
-Expected status:
+Response begins with:
 
 ```text
 HTTP/1.1 404 Not Found
 ```
 
-### Graceful shutdown
+### Stop the server
 
-Press `Ctrl+C` in the server terminal. The server should print:
+Press `Ctrl+C` in the server terminal. A clean shutdown ends with:
 
 ```text
 Server stopped.
 ```
 
-## Endpoints
+## HTTP API
 
-| Method | Path | Result |
-|---|---|---|
+| Method | Path | Response |
+| --- | --- | --- |
 | `GET` | `/` | Server status message |
-| `GET` | `/health` | `OK` health response |
-| `POST` | `/echo` | Returns the request body |
-| `GET` or `POST` | Any other path | `404 Not Found` |
-| Unsupported method/version | Any path | `400 Bad Request` |
+| `GET` | `/health` | `200 OK` and `OK` |
+| `POST` | `/echo` | `200 OK` and the request body |
+| `GET`, `POST` | Any unknown path | `404 Not Found` |
+| Unsupported method or HTTP version | Any path | `400 Bad Request` |
 
-## Architecture
+Every response includes `Content-Type`, `Content-Length`, and `Connection: close` headers.
 
-1. The listening socket is configured as non-blocking.
-2. The main thread polls for incoming connections.
-3. Accepted clients are placed into a synchronized worker queue.
-4. Worker threads wait efficiently on a condition variable.
-5. Each worker reads a bounded HTTP request using polling.
-6. The request is parsed and converted into an HTTP response.
+## How It Works
+
+```text
+Non-blocking listener
+        |
+        v
+   poll / WSAPoll
+        |
+        v
+  accept new clients
+        |
+        v
+ synchronized job queue
+        |
+        v
+   worker thread pool
+        |
+        v
+ parse request -> create response -> send response
+```
+
+1. The listener is configured as non-blocking and waits for connections with `poll` or `WSAPoll`.
+2. The main thread accepts ready clients and places their socket handles into a synchronized queue.
+3. Worker threads sleep on a condition variable until work arrives.
+4. A worker reads the request with a timeout and a maximum request-size limit.
+5. The HTTP request line and `Content-Length` header are parsed.
+6. The route handler creates a response with standard HTTP headers.
 7. The response is sent through the non-blocking client socket.
-8. RAII closes the client and listener sockets automatically.
+8. RAII closes the client socket, while the thread pool joins all workers during shutdown.
 
-## Example Metrics
+## Runtime Metrics
 
-The server logs the worker that processed each request:
+The server prints the worker thread and request size after each completed request:
 
 ```text
 thread=6 bytes=141
 thread=4 bytes=208
 ```
 
-Multiple thread IDs demonstrate that requests are being handled by the worker pool rather than by creating a new thread for every connection.
-
-## Scope and Limitations
-
-This is a focused HTTP server implementation for systems programming and networking practice. It intentionally does not attempt to replace a mature production server such as nginx or Apache.
-
-Not currently included:
-
-- TLS/HTTPS
-- HTTP keep-alive connections
-- Chunked transfer encoding
-- Static-file serving
-- Virtual hosts
-- Authentication and access control
-- Request routing frameworks
-- Persistent application storage
-
-These are natural next steps for extending the project.
+Different thread IDs show that requests are being distributed through the worker pool instead of creating a new operating-system thread for every connection.
 
 ## Project Structure
 
 ```text
 .
-├── Web Server.cpp       # HTTP server implementation
-├── .vscode/tasks.json   # VS Code build/run tasks
-└── README.md            # Project documentation
+├── Web Server.cpp       # Server implementation
+├── README.md            # Project documentation
+├── .gitignore           # Local build and test exclusions
+└── .vscode/
+    └── tasks.json       # VS Code build and run tasks
 ```
+
+## Design Goals
+
+- Keep the networking path explicit and easy to inspect.
+- Avoid blocking the accept loop on slow clients.
+- Reuse worker threads rather than spawning per request.
+- Make socket ownership and cleanup automatic.
+- Keep the implementation small enough to study and extend.
+
+## Current Scope
+
+This is a focused systems-programming server and a strong foundation for learning network services. It is not yet a drop-in replacement for a hardened production server such as nginx, Apache, or a mature C++ networking framework.
+
+Not currently included:
+
+- TLS/HTTPS
+- HTTP keep-alive
+- Chunked transfer encoding
+- Static-file serving
+- Request routing configuration
+- Authentication and authorization
+- Rate limiting
+- Access logging and metrics export
+- Persistent storage
+
+Possible next extensions include a configurable port, static-file responses, keep-alive connections, structured logging, a bounded queue, and TLS through a dedicated library.
 
 ## License
 
